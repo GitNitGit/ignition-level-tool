@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Ignition Level Tool – Setup</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { --bg: #15181e; --panel: #1d222b; --field: #242c3a; --text: #e4e7ec; --muted: #9aa2ae;
+          --accent: #ffcc33; --line: rgba(255,255,255,.12); --err: #ff5c5c; --ok: #6fdc8c; }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: var(--bg); color: var(--text);
+         font: 14px/1.5 system-ui, sans-serif; padding: 16px; }
+  main { width: min(640px, 100%); background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 24px; }
+  h1 { margin: 0 0 4px; font-size: 18px; letter-spacing: .06em; text-transform: uppercase; color: var(--accent); }
+  p { margin: 8px 0; }
+  .muted { color: var(--muted); font-size: 13px; }
+  code { font: 12px ui-monospace, monospace; background: var(--field); padding: 1px 4px; border-radius: 3px; }
+  .row { display: flex; gap: 8px; margin: 16px 0 8px; }
+  input { flex: 1; min-width: 0; font: 13px ui-monospace, monospace; color: var(--text); background: var(--field);
+          border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; }
+  button { font: inherit; color: var(--text); background: var(--field); border: 1px solid var(--line); border-radius: 6px;
+           padding: 7px 14px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: #111; border-color: var(--accent); font-weight: 600; }
+  button:disabled { opacity: .5; cursor: default; }
+  #msg { min-height: 1.5em; }
+  #msg.err { color: var(--err); }
+  #msg.ok { color: var(--ok); }
+  .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Ignition Level Tool</h1>
+  <p>This tool works with the files of your own copy of <b>Ignition</b> (1997). Please choose the game directory:
+    the folder holding <code>LEVELS</code> and <code>sys.col</code>, or a folder one or two levels above it
+    (for Steam e.g. <code>…\steamapps\common\Ignition</code>).</p>
+  <p class="muted" id="state"></p>
+  <div class="row">
+    <input id="dir" placeholder="C:\Games\Ignition" spellcheck="false" autocomplete="off">
+    <button id="browse" title="opens the Windows folder dialog (it may appear behind the browser)">Browse…</button>
+  </div>
+  <div id="msg"></div>
+  <div class="actions">
+    <button id="cancel" hidden>Back</button>
+    <button id="save" class="primary">Use this directory</button>
+  </div>
+  <p class="muted">The setting is stored in <code>data/config.json</code> of the tool's folder. Nothing is copied out of the game directory.</p>
+</main>
+<script type="module">
+const $ = id => document.getElementById(id);
+const next = new URLSearchParams(location.search).get('next') || '/';
+const target = /^\/[^/]/.test(next) || next === '/' ? next : '/';   // only paths of this server
+const say = (text, cls = '') => { $('msg').textContent = text; $('msg').className = cls; };
+
+const info = await (await fetch('/api/setup')).json();
+$('dir').value = info.gameDir || info.configured || '';
+$('state').textContent = info.gameDir
+  ? `Currently used: ${info.gameDir}${info.source === 'steam' ? ' (found in the Steam library)' : ''}`
+  : info.configured ? `The configured directory is not valid any more: ${info.configured}`
+  : 'No game directory found automatically (Steam libraries were searched).';
+if (info.gameDir) $('cancel').hidden = false;
+$('cancel').onclick = () => location.href = target;
+
+$('browse').onclick = async () => {
+  $('browse').disabled = true;
+  say('The folder dialog is open (look behind the browser window if you do not see it) …');
+  try {
+    const r = await (await fetch('/api/setup/browse', { method: 'POST' })).json();
+    if (r.path) { $('dir').value = r.path; say(''); } else say('No folder chosen.');
+  } catch (e) { say(String(e), 'err'); }
+  $('browse').disabled = false;
+};
+
+async function save() {
+  const dir = $('dir').value.trim().replace(/^"(.*)"$/, '$1');
+  if (!dir) return say('Please enter or choose a directory.', 'err');
+  $('save').disabled = true;
+  try {
+    const resp = await fetch('/api/setup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ gameDir: dir }) });
+    const r = await resp.json();
+    if (!resp.ok) { say(r.error || `HTTP ${resp.status}`, 'err'); return; }
+    say(`Found: ${r.gameDir}`, 'ok');
+    setTimeout(() => location.href = target, 600);
+  } catch (e) { say(String(e), 'err'); }
+  finally { $('save').disabled = false; }
+}
+$('save').onclick = save;
+$('dir').onkeydown = e => { if (e.key === 'Enter') save(); };
+</script>
+</body>
+</html>

@@ -1,0 +1,1034 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Ignition Level Viewer</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --panel: rgba(18, 20, 26, 0.88);
+    --text: #e6e6e6;
+    --muted: #9aa0aa;
+    --accent: #ffcc33;
+    --line: rgba(255, 255, 255, 0.12);
+  }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #1b2230; color: var(--text);
+    font: 13px/1.4 system-ui, "Segoe UI", sans-serif; }
+  canvas { display: block; }
+  [hidden] { display: none !important; }
+  #panel { position: absolute; top: 12px; left: 12px; width: 250px; padding: 14px 16px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    backdrop-filter: blur(4px); user-select: none; }
+  #panel h1 { margin: 0 0 10px; font-size: 16px; letter-spacing: 0.08em; color: var(--accent);
+    text-transform: uppercase; }
+  #panel section { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 10px; }
+  label { display: flex; align-items: center; gap: 8px; margin: 4px 0; cursor: pointer; }
+  select, button { font: inherit; color: var(--text); background: #2a303c; border: 1px solid var(--line);
+    border-radius: 6px; padding: 5px 8px; }
+  select { width: 100%; }
+  button { cursor: pointer; }
+  button:hover, select:hover { border-color: var(--accent); }
+  .row { display: flex; gap: 6px; }
+  .row button { flex: 1; }
+  input[type=range] { flex: 1; }
+  .muted { color: var(--muted); font-size: 12px; }
+  #stats { margin-top: 6px; }
+  #tip, #rulerLabel { position: absolute; pointer-events: none; padding: 4px 8px; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 6px; white-space: nowrap; }
+  #rulerLabel { color: var(--accent); border-color: var(--accent); }
+  #loading { position: absolute; inset: 0; display: grid; place-items: center; font-size: 15px;
+    color: var(--muted); pointer-events: none; }
+  kbd { font: 11px ui-monospace, monospace; padding: 0 4px; border: 1px solid var(--line);
+    border-radius: 3px; background: #2a303c; }
+</style>
+</head>
+<body>
+<div id="panel">
+  <h1>Ignition</h1>
+  <select id="level"></select>
+  <div id="stats" class="muted"></div>
+
+  <section>
+    <label><input type="checkbox" id="animate" checked> Animate textures</label>
+    <label class="muted">Frames/s <input type="range" id="speed" min="1" max="30" value="13"></label>
+    <label><input type="checkbox" id="move" checked> Move objects</label>
+    <label class="muted">Path frames/s <input type="range" id="fps" min="1" max="60" value="25"></label>
+    <label><input type="checkbox" id="fog" checked> Fog</label>
+    <label><input type="checkbox" id="shadow" checked> Cloud shadows</label>
+    <label><input type="checkbox" id="markers"> Sound sources &amp; emitters</label>
+    <label><input type="checkbox" id="gates" checked> Gates (.TRI)</label>
+    <div class="muted"><span style="color:#ff3030">■</span> start/finish
+      <span style="color:#3cff3c">■</span> first gate
+      <span style="color:#40a0ff">■</span> fork
+      <span style="color:#c060ff">■</span> merge
+      <span style="color:#ff9020">■</span> type 7</div>
+    <label><input type="checkbox" id="srf"> Collision (.SRF)</label>
+    <label><input type="checkbox" id="surf"> Surface code</label>
+    <label><input type="checkbox" id="flag4"> Face flag 0x04</label>
+    <label><input type="checkbox" id="plc"> Placements (meshes &amp; points)</label>
+    <label><input type="checkbox" id="flags"> Section flags
+      <select id="flagsBy" style="width:auto"><option value="2">flags2</option><option value="3">flags3</option></select></label>
+    <div id="flagsLegend" class="muted" hidden></div>
+    <label><input type="checkbox" id="wire"> Wireframe</label>
+    <label><input type="checkbox" id="smooth"> Smooth textures</label>
+    <label title="R: drag on the level to measure the distance in world units"><input type="checkbox" id="ruler"> Ruler (R)</label>
+  </section>
+
+  <section>
+    <div class="row">
+      <button id="top">Top view</button>
+      <button id="oblique">Oblique</button>
+    </div>
+    <div class="row" style="margin-top:6px">
+      <button id="exportObj" title="the level as Wavefront OBJ with its textures (zip), for Blender and other 3D programs">Download OBJ</button>
+    </div>
+  </section>
+
+  <section class="muted">
+    Right mouse button rotate, left pan, wheel zoom (as in the editor).<br>
+    <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> fly, <kbd>Q</kbd>/<kbd>E</kbd> down/up,
+    <kbd>Shift</kbd> faster.
+  </section>
+</div>
+<div id="tip" hidden></div>
+<div id="rulerLabel" hidden></div>
+<div id="loading">Loading …</div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "/vendor/three.module.js",
+  "three/addons/controls/OrbitControls.js": "/vendor/OrbitControls.js"
+} }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const $ = id => document.getElementById(id);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setSize(innerWidth, innerHeight);
+document.body.prepend(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x1b2230);
+const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 5, 400000);
+const controls = new OrbitControls(camera, renderer.domElement);
+// the buttons as in the editor: right rotates, left pans (the left button also measures with the ruler)
+controls.mouseButtons = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE };
+controls.enableDamping = true;
+controls.screenSpacePanning = true;
+
+const vertexShader = `
+  attribute vec2 texel;
+  varying vec2 vT;
+  void main() {
+    vT = texel;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }`;
+const fragmentShader = `
+  uniform sampler2D map;
+  uniform vec2 texSize;
+  uniform float colorkey;
+  uniform float opacity;
+  varying vec2 vT;
+  void main() {
+    vec4 c = texture2D(map, vT / texSize);
+    if (colorkey > 0.5 && c.a < 0.5) discard;
+    if (c.a < 0.01) discard;
+    gl_FragColor = vec4(c.rgb, c.a * opacity);
+  }`;
+
+let level = null;          // { root, materials, textures, markerGroup, bounds }
+const loader = new THREE.TextureLoader();
+
+function loadTexture(url) {
+  return new Promise((resolve, reject) => loader.load(url, t => {
+    t.flipY = false;                       // texel v counts from the top
+    t.colorSpace = THREE.NoColorSpace;     // palette colours as-is, unlit like the game
+    t.generateMipmaps = false;
+    t.minFilter = THREE.LinearFilter;
+    t.magFilter = $('smooth').checked ? THREE.LinearFilter : THREE.NearestFilter;
+    resolve(t);
+  }, undefined, reject));
+}
+
+async function loadLevel(name) {
+  $('loading').hidden = false;
+  $('loading').textContent = 'Loading…';
+  // always fetch fresh data: the server makes it from the game files (and the editor's level) on request
+  const bust = `?v=${Date.now()}`;
+  const resp = await fetch(`levels/${name}/level.json${bust}`, { cache: 'no-store' });
+  const data = await resp.json().catch(() => ({ error: `HTTP ${resp.status}` }));
+  if (!resp.ok) { $('loading').textContent = `${names[name] || name}: ${data.error || resp.status}`; return; }
+  if (level) {
+    scene.remove(level.root);
+    scene.remove(level.markerGroup);
+    scene.remove(level.mistGroup);
+    level.smokeFrames.forEach(t => t.dispose());
+    level.lightFrames.forEach(t => t.dispose());
+    level.darkFrames.forEach(t => t.dispose());
+    scene.remove(level.boltGroup);
+    scene.remove(level.gateGroup);
+    level.gateGroup.traverse(o => o.isSprite && (o.material.map.dispose(), o.material.dispose()));
+    // overlays: remove and free every group (a forgotten one stays in the next level)
+    for (const g of [level.srfGroup, level.surfGroup, level.plcGroup, level.flagGroup, level.flag4Group]) {
+      scene.remove(g);
+      g.traverse(o => { o.geometry?.dispose(); o.material?.map?.dispose(); o.material?.dispose(); });
+    }
+    scene.remove(level.blinkGroup);
+    level.root.traverse(o => o.geometry && o.geometry.dispose());
+    level.materials.forEach(m => m.dispose());
+    Object.values(level.textures).forEach(t => t.dispose());
+  }
+  const textures = {};
+  await Promise.all(Object.keys(data.textures).map(async fn => {
+    textures[fn] = await loadTexture(`levels/${name}/${fn}${bust}`);
+  }));
+
+  // flip-books from the level's animation tables: the game copies frame after
+  // frame into one tile of the texture; do the same on a pixel copy in memory.
+  // (Re-uploading a 2D canvas every frame made the whole texture blank for a
+  // frame on some GPUs/drivers: trees on the same texture flickered.)
+  const flipbooks = [];
+  const loadImage = url => new Promise((ok, err) => {
+    const i = new Image(); i.onload = () => ok(i); i.onerror = err; i.src = url;
+  });
+  const pixelsOf = img => {
+    const cv = document.createElement('canvas');
+    cv.width = img.width; cv.height = img.height;
+    const ctx = cv.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(img, 0, 0);
+    return ctx.getImageData(0, 0, img.width, img.height).data;
+  };
+  for (const fb of data.flipbooks || []) {
+    const targets = [];
+    for (const [texFile, stripFile] of Object.entries(fb.files)) {
+      if (!textures[texFile]) continue;
+      if (!textures[texFile].isDataTexture) {
+        const img = textures[texFile].image;
+        const t = new THREE.DataTexture(new Uint8Array(pixelsOf(img)), img.width, img.height);
+        t.flipY = false; t.colorSpace = THREE.NoColorSpace; t.generateMipmaps = false;
+        t.minFilter = THREE.LinearFilter;
+        t.magFilter = $('smooth').checked ? THREE.LinearFilter : THREE.NearestFilter;
+        t.needsUpdate = true;
+        textures[texFile].dispose();
+        textures[texFile] = t;
+      }
+      const strip = await loadImage(`levels/${name}/${stripFile}${bust}`);
+      targets.push({ tex: textures[texFile], strip: pixelsOf(strip), stripWidth: strip.width });
+    }
+    if (targets.length) flipbooks.push({ tile: fb.tile, frames: fb.frames, targets, last: 0 });
+  }
+
+  // warning light sprites: GENERAL/Light.tfx frames 0..4
+  const lightFrames = [];
+  if (data.light) {
+    const img = await loadImage(`levels/${name}/${data.light}${bust}`);
+    for (let i = 0; i < img.width / 64; i++) {
+      const cv = document.createElement('canvas');
+      cv.width = cv.height = 64;
+      cv.getContext('2d').drawImage(img, i * 64, 0, 64, 64, 0, 0, 64, 64);
+      const t = new THREE.CanvasTexture(cv);
+      t.colorSpace = THREE.SRGBColorSpace;   // sprites get colour-managed, keep palette values
+      lightFrames.push(t);
+    }
+  }
+
+  // dark smoke after lightning strikes: GENERAL/Darksmok.tfx
+  const darkFrames = [];
+  if (data.darksmoke) {
+    const img = await loadImage(`levels/${name}/${data.darksmoke}${bust}`);
+    for (let i = 0; i < img.width / 64; i++) {
+      const cv = document.createElement('canvas');
+      cv.width = cv.height = 64;
+      cv.getContext('2d').drawImage(img, i * 64, 0, 64, 64, 0, 0, 64, 64);
+      const t = new THREE.CanvasTexture(cv);
+      t.colorSpace = THREE.SRGBColorSpace;   // sprites get colour-managed, keep palette values
+      darkFrames.push(t);
+    }
+  }
+
+  // mist puff sprites: GENERAL/Smoke.tfx, one texture per frame
+  const smokeFrames = [];
+  if (data.smoke) {
+    const img = await loadImage(`levels/${name}/${data.smoke}${bust}`);
+    for (let i = 0; i < img.width / 64; i++) {
+      const cv = document.createElement('canvas');
+      cv.width = cv.height = 64;
+      cv.getContext('2d').drawImage(img, i * 64, 0, 64, 64, 0, 0, 64, 64);
+      const t = new THREE.CanvasTexture(cv);
+      t.colorSpace = THREE.SRGBColorSpace;   // sprites get colour-managed, keep palette values
+      smokeFrames.push(t);
+    }
+  }
+
+  const root = new THREE.Group();
+  const materials = [];
+  const pickable = [];
+
+  // game (x, y, z) -> three (x, y, -z)
+  function addGroups(groups, parent) {
+    for (const g of groups) {
+      const fn = `tex${String(g.tex).padStart(2, '0')}${g.mode ? '_' + g.mode : ''}.png`;
+      const overlay = g.mode === 'fog' || g.mode === 'shadow';
+      const blend = g.mode === 'blend';     // flag 0x02: translucent in the game
+      const mat = new THREE.ShaderMaterial({
+        uniforms: {
+          map: { value: textures[fn] },
+          texSize: { value: new THREE.Vector2(256, data.textures[fn]) },
+          colorkey: { value: g.mode === 'ck' || blend ? 1 : 0 },
+          opacity: { value: blend ? 0.5 : 1 },
+        },
+        vertexShader, fragmentShader,
+        // one-sided like the game; the game's winding is clockwise in three's frame
+        side: g.double ? THREE.DoubleSide : THREE.BackSide,
+        transparent: overlay || blend,
+        depthWrite: !overlay && !blend,
+      });
+      materials.push(mat);
+
+      const pos = new Float32Array(g.pos.length);
+      for (let i = 0; i < g.pos.length; i += 3) {
+        pos[i] = g.pos[i]; pos[i + 1] = g.pos[i + 1]; pos[i + 2] = -g.pos[i + 2];
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      geo.setAttribute('texel', new THREE.BufferAttribute(new Float32Array(g.uv), 2));
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.userData.mode = g.mode;
+      mesh.renderOrder = g.mode === 'shadow' ? 1 : blend ? 2 : g.mode === 'fog' ? 3 : 0;
+      parent.add(mesh);
+      if (!overlay && !blend && parent === root) pickable.push(mesh);
+    }
+  }
+  addGroups(data.groups, root);
+
+  // animated objects: the .POS path moves the object relative to its first frame
+  // (world = placement + frame - frame0), the rotation turns it about its own
+  // origin (USA windmill: the placement sits exactly on the tower top)
+  const movers = [];
+  for (const o of data.objects || []) {
+    const body = new THREE.Group();
+    addGroups(o.groups, body);
+    root.add(body);
+    movers.push({ node: body, frames: o.frames, rotate: true, offset: o.offset });
+  }
+  scene.add(root);
+
+  // markers: sound emitters sit high in the sky in the data, drop them onto the ground
+  const markerGroup = new THREE.Group();
+  const ray = new THREE.Raycaster();
+  const [x0, y0, z0, x1, y1, z1] = data.bounds;
+  const ground = (x, z) => {
+    ray.set(new THREE.Vector3(x, y1 + 1000, -z), new THREE.Vector3(0, -1, 0));
+    const hit = ray.intersectObjects(pickable, false)[0];
+    return hit ? hit.point.y : y0;
+  };
+  const markerInfo = [];
+  for (const m of data.markers) {
+    if (m.type === 'effect_template' || m.type === 'blinker') continue;
+    const [x, y, z] = m.pos;
+    const isSound = m.type === 'marker' && m.sound;
+    const color = m.type === 'emitter' ? 0xffffff : isSound ? 0xffcc33 : 0x55aaff;
+    const s = new THREE.Mesh(new THREE.SphereGeometry(60, 16, 12),
+      new THREE.MeshBasicMaterial({ color, depthTest: false, transparent: true, opacity: 0.85 }));
+    s.renderOrder = 10;
+    s.userData.label = m.type === 'emitter' ? `Geyser, type ${m.id}`
+      : m.id === MIST_EMITTER ? 'Mist emitter (waterfall)'
+      : LAVA_EMITTERS.includes(m.id) ? `Smoke emitter (lava), type ${m.id}`
+      : isSound ? `Sound: ${m.sound.split(/[\/]/).pop()}` : `Marker ${m.id} (unknown)`;
+    if (m.anim) {
+      // moving sound source: follow the path, height of the ground at the start
+      const f = m.anim.frames;
+      const lift = ground(f[1] + m.anim.offset[0], f[3] + m.anim.offset[2]) + 80
+                   - (f[2] + m.anim.offset[1]);
+      const holder = new THREE.Object3D();
+      s.position.set(m.anim.offset[0], m.anim.offset[1] + lift, -m.anim.offset[2]);
+      holder.add(s);
+      markerGroup.add(holder);
+      movers.push({ node: holder, frames: f, rotate: false });
+    } else {
+      s.position.set(x, (m.type === 'marker' ? ground(x, z) : y) + 80, -z);
+      markerGroup.add(s);
+    }
+    markerInfo.push(s);
+  }
+  markerGroup.visible = $('markers').checked;
+  scene.add(markerGroup);
+
+  // rising mist at the mist emitters
+  const mistGroup = new THREE.Group();
+  // white mist (102, Smoke.tfx, additive) and black lava smoke (95/103,
+  // Darksmok.tfx, multiplied); moving markers (Canada train) are left out
+  const emitters = data.markers.filter(m => !m.anim && (
+    ((m.id === MIST_EMITTER || m.type === 'emitter') && smokeFrames.length) ||
+    (LAVA_EMITTERS.includes(m.id) && darkFrames.length)));
+  const puffs = [];
+  for (const m of emitters) {
+    const dark = LAVA_EMITTERS.includes(m.id);
+    const cfg = m.type === 'emitter' ? GEYSER : MIST_TYPES[m.id] || MIST;
+    for (let i = 0; i < cfg.perEmitter; i++) {
+      const sp = new THREE.Sprite(new THREE.SpriteMaterial(dark ? {
+        map: darkFrames[0], transparent: true, depthWrite: false,
+        premultipliedAlpha: true, blending: THREE.CustomBlending,
+        blendEquation: THREE.AddEquation, blendSrc: THREE.DstColorFactor,
+        blendDst: THREE.OneMinusSrcAlphaFactor } : {
+        map: smokeFrames[0], transparent: true, depthWrite: false,
+        // GENERAL smoke is grey palette colour, added onto the scene
+        blending: THREE.AdditiveBlending }));
+      sp.renderOrder = 4;
+      mistGroup.add(sp);
+      // the data has no start phase: stagger emitters (stable per placement)
+      const phase = ((m.pl ?? 0) * 0.618) % 1;
+      puffs.push({ sp, origin: m.pos, age: cfg.period
+                     ? phase * cfg.period - i * cfg.stagger     // burst: puffs right after each other
+                     : ((i + phase) / cfg.perEmitter) * cfg.life,
+                   dx: 0, dz: 0, dark, cfg });
+    }
+  }
+  scene.add(mistGroup);
+
+  // blinking warning lights on the lamp quads of type-154 objects
+  const blinkGroup = new THREE.Group();
+  const blinkers = [];
+  if (lightFrames.length) {
+    for (const m of data.markers.filter(m => m.type === 'blinker')) {
+      const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: lightFrames[0], transparent: true, depthWrite: false, opacity: BLINK.opacity,
+        blending: THREE.AdditiveBlending }));
+      const s = m.size * BLINK.scale;
+      sp.scale.set(s, s, 1);
+      sp.position.set(m.pos[0], m.pos[1], -m.pos[2]);
+      sp.renderOrder = 5;
+      blinkGroup.add(sp);
+      blinkers.push({ sp });   // markers come in .PLC order = chase order
+    }
+  }
+  scene.add(blinkGroup);
+
+  // lightning: strikes into the surface-26 faces (Canada puddles)
+  const boltGroup = new THREE.Group();
+  scene.add(boltGroup);
+  const storm = { targets: data.lightning || [], next: 2, bolt: null, smoke: [] };
+
+  // track gates from .TRI: a line across the track per record, coloured by
+  // the placement type of its track section (LEVELFORMAT.md, chapter 15)
+  const gateGroup = new THREE.Group();
+  for (const g of data.gates || []) {
+    const color = GATE_COLORS[g.type] ?? GATE_COLORS.other;
+    const geo = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(g.a[0], g.a[1] + 20, -g.a[2]), new THREE.Vector3(g.b[0], g.b[1] + 20, -g.b[2])]);
+    const line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color, depthTest: false }));
+    line.renderOrder = 9;
+    line.userData.label = `Gate ${g.rec}, placement type ${g.type}`;
+    gateGroup.add(line);
+    // record number (= placement number) above the middle of the gate
+    const cv = document.createElement('canvas');
+    cv.width = 128; cv.height = 64;
+    const ctx = cv.getContext('2d');
+    ctx.font = 'bold 44px system-ui, sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.lineWidth = 8; ctx.strokeStyle = '#000';
+    ctx.strokeText(g.rec, 64, 32);
+    ctx.fillStyle = '#' + color.toString(16).padStart(6, '0');
+    ctx.fillText(g.rec, 64, 32);
+    const tex = new THREE.CanvasTexture(cv);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false }));
+    label.scale.set(GATE_LABEL, GATE_LABEL / 2, 1);
+    label.position.set((g.a[0] + g.b[0]) / 2, (g.a[1] + g.b[1]) / 2 + 20 + GATE_LABEL / 4,
+                       -(g.a[2] + g.b[2]) / 2);
+    label.renderOrder = 9;
+    gateGroup.add(label);
+  }
+  gateGroup.visible = $('gates').checked;
+  scene.add(gateGroup);
+
+  // .SRF landscape collision: faces listed there green (track and landscape
+  // placements), static single objects (trees, houses, signs) red
+  const srfGroup = new THREE.Group();
+  for (const [key, color] of [['floor', 0x30ff30], ['other', 0xff3030]]) {
+    const src = (data.collision || {})[key] || [];
+    const pos = new Float32Array(src.length);
+    for (let i = 0; i < src.length; i += 3) {
+      pos[i] = src[i]; pos[i + 1] = src[i + 1]; pos[i + 2] = -src[i + 2];
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+      color, transparent: true, opacity: 0.45, side: THREE.DoubleSide, depthWrite: false,
+      polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+    mesh.renderOrder = 8;
+    srfGroup.add(mesh);
+  }
+  srfGroup.visible = $('srf').checked;
+
+  // faces with face flag 0x04 (assumed: double-sided, LEVELFORMAT ch. 16) in orange
+  const flag4Group = new THREE.Group();
+  { const src = (data.collision || {}).flag4 || [];
+    const pos = new Float32Array(src.length);
+    for (let i = 0; i < src.length; i += 3) { pos[i] = src[i]; pos[i + 1] = src[i + 1]; pos[i + 2] = -src[i + 2]; }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0xff8c1a, transparent: true, opacity: 0.7,
+      side: THREE.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 }));
+    mesh.renderOrder = 8;
+    mesh.userData.label = `Face flag 0x04 (${src.length / 9} faces)`;
+    flag4Group.add(mesh); }
+  flag4Group.visible = $('flag4').checked;
+  scene.add(flag4Group);
+  scene.add(srfGroup);
+
+  // faces coloured by their surface code (MSH face field), hover shows the code
+  const surfGroup = new THREE.Group();
+  const surfMeshes = [];
+  for (const [code, src] of Object.entries((data.collision || {}).surf || {})) {
+    const pos = new Float32Array(src.length);
+    for (let i = 0; i < src.length; i += 3) {
+      pos[i] = src[i]; pos[i + 1] = src[i + 1]; pos[i + 2] = -src[i + 2];
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    const c = +code;
+    // drivable green (shade per material), conditional deadly orange,
+    // not drivable grey-blue, deadly red, objects purple
+    const kind = surfaceKind(c);
+    const color = kind === 'drive' ? new THREE.Color().setHSL(0.25 + (c % 5) * 0.04, 0.8, 0.4 + Math.floor(c / 5) * 0.05)
+      : kind === 'conditional' ? new THREE.Color(0xff9020)
+      : kind === 'deadly' ? new THREE.Color(c === 131 ? 0x2060ff : 0xff2020)
+      : kind === 'object' ? new THREE.Color(0xb040ff)
+      : new THREE.Color(0x8090a0);
+    const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+      color, transparent: true, opacity: 0.6, side: THREE.DoubleSide, depthWrite: false,
+      polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+    mesh.renderOrder = 8;
+    mesh.userData.label = `Surface code ${code}: ${describeSurface(c)} (${src.length / 9} faces)`;
+    surfGroup.add(mesh);
+    surfMeshes.push(mesh);
+  }
+  surfGroup.visible = $('surf').checked;
+  scene.add(surfGroup);
+
+  // placements (.PLC): every static mesh in its own colour, its placement point
+  // as a dot on a short pole; hover shows number, type, flags and how far the
+  // mesh reaches from the point (walls only work close to it, LEVELFORMAT 20/9)
+  const plcGroup = new THREE.Group();
+  const plcMeshes = [];
+  for (const p of data.placements || []) {
+    const label = `Placement ${p.pl}, type ${p.type}, flags ${p.flags.join('/')}, ` +
+      `${p.faces} faces, reaches ${p.radius} from the point`;
+    const color = new THREE.Color().setHSL((p.pl * 0.618034) % 1, 0.75, 0.55);
+    const pos = new Float32Array(p.xyz.length);
+    for (let i = 0; i < p.xyz.length; i += 3) {
+      pos[i] = p.xyz[i]; pos[i + 1] = p.xyz[i + 1]; pos[i + 2] = -p.xyz[i + 2];
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+      color, transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false,
+      polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+    mesh.renderOrder = 8;
+    mesh.userData.label = label;
+    plcGroup.add(mesh);
+    plcMeshes.push(mesh);
+    const [x, y, z] = p.pos;
+    const pole = new THREE.Line(new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(x, y, -z), new THREE.Vector3(x, y + PLC_POLE, -z)]),
+      new THREE.LineBasicMaterial({ color, depthTest: false }));
+    pole.renderOrder = 9;
+    plcGroup.add(pole);
+    const dot = new THREE.Mesh(new THREE.SphereGeometry(35, 12, 8),
+      new THREE.MeshBasicMaterial({ color, depthTest: false }));
+    dot.position.set(x, y + PLC_POLE, -z);
+    dot.renderOrder = 9;
+    dot.userData.label = label;
+    plcGroup.add(dot);
+    plcMeshes.push(dot);
+  }
+  plcGroup.visible = $('plc').checked;
+  scene.add(plcGroup);
+
+  // section flags (.PLC flags2/flags3, meaning unknown, LEVELFORMAT ch. 15): every
+  // track section (type 0..8) coloured by the chosen byte (0 grey), "flags2/flags3"
+  // above its placement point
+  const flagGroup = new THREE.Group(), flagMeshes = [];
+  for (const p of data.placements || []) {
+    if (p.type > 8) continue;
+    const [, f2, f3] = p.flags;
+    const pos = new Float32Array(p.xyz.length);
+    for (let i = 0; i < p.xyz.length; i += 3) {
+      pos[i] = p.xyz[i]; pos[i + 1] = p.xyz[i + 1]; pos[i + 2] = -p.xyz[i + 2];
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+      transparent: true, opacity: 0.7, side: THREE.DoubleSide, depthWrite: false,
+      polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 }));
+    mesh.renderOrder = 8;
+    mesh.userData.label = `Placement ${p.pl}, type ${p.type}, flags2 ${f2}, flags3 ${f3}`;
+    mesh.userData.flags = [f2, f3];
+    flagGroup.add(mesh);
+    flagMeshes.push(mesh);
+    const cv = document.createElement('canvas');
+    cv.width = 192; cv.height = 64;
+    const ctx = cv.getContext('2d');
+    ctx.font = 'bold 40px system-ui, sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.lineWidth = 8; ctx.strokeStyle = '#000';
+    ctx.strokeText(`${f2}/${f3}`, 96, 32);
+    ctx.fillStyle = '#fff';
+    ctx.fillText(`${f2}/${f3}`, 96, 32);
+    const tex = new THREE.CanvasTexture(cv);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false }));
+    label.scale.set(GATE_LABEL * 1.5, GATE_LABEL / 2, 1);
+    label.position.set(p.pos[0], p.pos[1] + 140, -p.pos[2]);
+    label.renderOrder = 10;
+    flagGroup.add(label);
+  }
+  flagGroup.visible = $('flags').checked;
+  scene.add(flagGroup);
+
+  level = { root, materials, textures, markerGroup, markerInfo, movers, gateGroup, srfGroup,
+            surfGroup, surfMeshes, plcGroup, plcMeshes, flagGroup, flagMeshes, flag4Group,
+            flipbooks, smokeFrames, mistGroup, puffs, lightFrames, blinkGroup, blinkers,
+            darkFrames, boltGroup, storm,
+            bounds: data.bounds, name };
+  const sounds = data.markers.filter(m => m.type === 'marker').length;
+  const emit = data.markers.filter(m => m.type === 'emitter').length;
+  $('stats').textContent = `${data.triangles.toLocaleString('en')} triangles · ` +
+    `${Object.keys(textures).length} texture files · ${sounds + emit} markers · ` +
+    `${movers.filter(m => m.rotate).length} moving objects`;
+  animTime = 0;
+  applyToggles();
+  updateMovers();
+  view('oblique');
+  // ?cam=x,y,z&look=x,y,z in game coordinates (for screenshots)
+  const q = new URLSearchParams(location.search);
+  if (q.get('cam') && q.get('look')) {
+    const [cx, cy, cz] = q.get('cam').split(',').map(Number);
+    const [lx, ly, lz] = q.get('look').split(',').map(Number);
+    camera.position.set(cx, cy, -cz);
+    controls.target.set(lx, ly, -lz);
+    controls.update();
+  }
+  $('loading').hidden = true;
+}
+
+// ---- surface codes (face field in .MSH) ----
+// below 78: drivable, code = 5 * behaviour + material (material = the roll/skid
+// sound in GENERAL/SOUND); 78 and up: not drivable (acts like a wall even when
+// flat), 110 and 131 kill; 300 and up: moving/single objects
+const MATERIALS = ['asphalt', 'gravel', 'mud', 'sand', 'snow'];
+const BEHAVIOURS = { 0: 'normal', 1: 'slippery (little grip)', 2: 'ramp / take-off edge',
+                     3: 'acceleration? (Austria ski ramp)',
+                     4: 'deadly when reached outside the gate order', 5: 'lightning target' };
+const CATEGORIES = {
+  110: 'not drivable, deadly: explosion + reset',
+  131: 'not drivable, deadly: water + reset',
+};
+function surfaceKind(c) {
+  if (c >= 300) return 'object';
+  if (c === 110 || c === 131) return 'deadly';
+  if (c >= 78) return 'wall';
+  return Math.floor(c / 5) === 4 ? 'conditional' : 'drive';
+}
+function describeSurface(c) {
+  if (c < 78) {
+    const b = Math.floor(c / 5);
+    return `drivable, ${MATERIALS[c % 5]}, behaviour ${b}` +
+      (BEHAVIOURS[b] ? ` (${BEHAVIOURS[b]})` : ' (unknown)');
+  }
+  if (c >= 300) return 'object';
+  return CATEGORIES[c] || 'not drivable (like a wall)';
+}
+
+// ---- texture flip-books: frame = floor(time * fps), frame k of a strip goes into the tile ----
+let flipTime = 0;
+function updateFlipbooks() {
+  const fps = +$('speed').value;
+  for (const fb of level.flipbooks) {
+    const f = Math.floor(flipTime * fps) % fb.frames;
+    if (f === fb.last) continue;
+    fb.last = f;
+    const [x, y] = fb.tile;
+    for (const t of fb.targets) {
+      const dst = t.tex.image.data, w = t.tex.image.width;
+      for (let r = 0; r < 64; r++) {
+        const s = (r * t.stripWidth + f * 64) * 4;
+        dst.set(t.strip.subarray(s, s + 256), ((y + r) * w + x) * 4);
+      }
+      t.tex.needsUpdate = true;
+    }
+  }
+}
+
+// ---- lightning (all timings and shapes are guesses from the video) ----
+const LIGHTNING = { pauseMin: 3, pauseMax: 9, boltTime: 0.12, height: 2500,
+                    width: 18, smokePuffs: 1, smokeLife: 2.5, smokeRise: 250, smokeSize: 160 };
+function makeBolt([x, y, z]) {
+  // jagged ribbon from the sky to the target, drawn as thin white triangles
+  const pos = [], steps = 10;
+  let px = x + (Math.random() - 0.5) * 600, pz = z + (Math.random() - 0.5) * 600;
+  for (let i = 0; i < steps; i++) {
+    const f0 = i / steps, f1 = (i + 1) / steps;
+    const ax = i ? px : x + (px - x), az = i ? pz : z + (pz - z);
+    const bx = i === steps - 1 ? x : x + (px - x) * (1 - f1) + (Math.random() - 0.5) * 120;
+    const bz = i === steps - 1 ? z : z + (pz - z) * (1 - f1) + (Math.random() - 0.5) * 120;
+    const ay = y + LIGHTNING.height * (1 - f0), by = y + LIGHTNING.height * (1 - f1);
+    const w = LIGHTNING.width * (1 - f0 * 0.8);
+    pos.push(ax - w, ay, -az, ax + w, ay, -az, bx, by, -bz);
+    px = bx; pz = bz;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3));
+  return new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide }));
+}
+function updateLightning(dt) {
+  const s = level.storm;
+  if (!s.targets.length) return;
+  s.next -= dt;
+  if (s.bolt) {
+    s.bolt.age += dt;
+    if (s.bolt.age > LIGHTNING.boltTime) {
+      level.boltGroup.remove(s.bolt.mesh);
+      s.bolt.mesh.geometry.dispose();
+      // dark smoke rises from the hit
+      for (let i = 0; i < LIGHTNING.smokePuffs; i++) {
+        // Darksmok.tfx is multiplied onto the scene (dark core, lighter rim);
+        // premultiplied alpha makes this dst * mix(1, tex, alpha), so opacity fades it
+        const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+          map: level.darkFrames[0], transparent: true, depthWrite: false,
+          premultipliedAlpha: true, blending: THREE.CustomBlending,
+          blendEquation: THREE.AddEquation, blendSrc: THREE.DstColorFactor,
+          blendDst: THREE.OneMinusSrcAlphaFactor }));
+        level.boltGroup.add(sp);
+        s.smoke.push({ sp, at: s.bolt.target, age: -i * 0.3,
+                       dx: (Math.random() - 0.5) * 60, dz: (Math.random() - 0.5) * 60 });
+      }
+      s.bolt = null;
+    }
+  } else if (s.next <= 0) {
+    const target = s.targets[Math.floor(Math.random() * s.targets.length)];
+    const mesh = makeBolt(target);
+    level.boltGroup.add(mesh);
+    s.bolt = { mesh, target, age: 0 };
+    s.next = LIGHTNING.pauseMin + Math.random() * (LIGHTNING.pauseMax - LIGHTNING.pauseMin);
+  }
+  for (const p of s.smoke.slice()) {
+    p.age += dt;
+    const f = Math.max(0, p.age) / LIGHTNING.smokeLife;
+    if (f >= 1) { level.boltGroup.remove(p.sp); s.smoke.splice(s.smoke.indexOf(p), 1); continue; }
+    const fr = level.darkFrames;
+    p.sp.material.map = fr[Math.min(fr.length - 1, Math.floor(f * fr.length))];
+    p.sp.material.opacity = p.age < 0 ? 0 : Math.sin(f * Math.PI);
+    const size = LIGHTNING.smokeSize * (0.5 + f);
+    p.sp.scale.set(size, size, 1);
+    p.sp.position.set(p.at[0] + p.dx, p.at[1] + f * LIGHTNING.smokeRise, -(p.at[2] + p.dz));
+  }
+}
+
+// ---- warning lights: cycle through the Light.tfx frames at the texture fps ----
+// chase light over all warning lights in file (.PLC) order: every game tick the
+// flash moves on by one light, each light plays the 5 Light.tfx frames when hit.
+// Tick measured in the Canada video (22 lights per ~0.64 s); ring size guessed.
+const BLINK = { scale: 10, tick: 0.058, opacity: 0.5 };
+const GATE_LABEL = 160;            // width of the gate numbers in world units
+const PLC_POLE = 250;              // height of the pole above each placement point
+// gate colour by placement type: 0 start/finish, 1 first section, 3 fork,
+// 6 merge, 7 pair with a gap (jump or crossing?), other sections yellow
+const GATE_COLORS = { 0: 0xff3030, 1: 0x3cff3c, 3: 0x40a0ff, 6: 0xc060ff, 7: 0xff9020,
+                      other: 0xffdc28 };
+function updateBlinkers() {
+  const n = level.lightFrames.length, count = level.blinkers.length;
+  const step = Math.floor(flipTime / BLINK.tick);
+  level.blinkers.forEach((b, rank) => {
+    const f = ((step - rank) % count + count) % count;
+    b.sp.visible = f < n;
+    if (f < n) b.sp.material.map = level.lightFrames[f];
+  });
+}
+
+// ---- rising mist: puffs cycle through the smoke frames while drifting up ----
+const MIST_EMITTER = 102;          // marker id (Canada, Brazil waterfalls)
+// life: seconds per puff (the 8 smoke frames are spread over it); a new puff
+// every life/perEmitter seconds; the puff rests at the emitter for 'hold' of
+// its life, then drifts up, accelerating gently
+const MIST = { perEmitter: 5, life: 6, hold: 0.25, rise: 320, size0: 120, size1: 340,
+               spread: 120, opacity: 0.25 };
+// per emitter type: 102 waterfall mist (above), 103 the same in black,
+// 95 a narrow, fast, continuous black plume (all values by eye)
+// geysers (Iceland, flat emitter quads): a short burst of small white puffs
+// shooting up every few seconds (values by eye)
+const GEYSER = { perEmitter: 6, period: 4, stagger: 0.12, life: 1.6, hold: 0, rise: 450,
+                 size0: 40, size1: 150, spread: 30, opacity: 0.6 };
+const MIST_TYPES = {
+  102: MIST,
+  103: { ...MIST, opacity: 0.9 },
+  95: { perEmitter: 8, life: 2, hold: 0, rise: 300, size0: 50, size1: 140, spread: 20, opacity: 0.9 },
+};
+const LAVA_EMITTERS = [95, 103];   // marker ids on lava (Iceland, Brazil): black smoke
+function updateMist(dt) {
+  level.mistGroup.visible = $('fog').checked;
+  for (const p of level.puffs) {
+    const c = p.cfg;
+    p.age += dt;
+    const cycle = c.period || c.life;
+    if (p.age >= cycle) {           // respawn with a little jitter
+      p.age -= cycle;
+      p.dx = (Math.random() - 0.5) * c.spread;
+      p.dz = (Math.random() - 0.5) * c.spread;
+    }
+    p.sp.visible = p.age >= 0 && p.age < c.life;   // bursts: idle between them
+    const f = Math.min(1, Math.max(0, p.age / c.life));
+    const size = c.size0 + (c.size1 - c.size0) * f;
+    const frames = p.dark ? level.darkFrames : level.smokeFrames;   // 8 frames over the life
+    p.sp.material.map = frames[Math.min(frames.length - 1, Math.floor(f * frames.length))];
+    p.sp.scale.set(size, size, 1);
+    // several puffs overlap: keep each one faint
+    p.sp.material.opacity = c.opacity * Math.sin(f * Math.PI);
+    const up = Math.max(0, (f - c.hold) / (1 - c.hold));
+    p.sp.position.set(p.origin[0] + p.dx, p.origin[1] + up * up * c.rise, -(p.origin[2] + p.dz));
+  }
+}
+
+// ---- object animation (.POS frames: r0, x, y, z, r1, r2; angles in 1/10 degree) ----
+let animTime = 0;
+const DEG10 = Math.PI / 1800;
+const lerpAngle = (a, b, t) => { let d = ((b - a) % 3600 + 5400) % 3600 - 1800; return a + d * t; };
+
+function updateMovers() {
+  if (!level) return;
+  for (const m of level.movers) {
+    const f = m.frames, n = f.length / 6;
+    const ft = animTime % n, k = Math.floor(ft);
+    // no blending from the last frame back to the first: the game restarts the path
+    const t = k === n - 1 ? 0 : ft - k;
+    const a = k * 6, b = Math.min(k + 1, n - 1) * 6;
+    const x = f[a + 1] + (f[b + 1] - f[a + 1]) * t;
+    const y = f[a + 2] + (f[b + 2] - f[a + 2]) * t;
+    const z = f[a + 3] + (f[b + 3] - f[a + 3]) * t;
+    const o = m.offset || [0, 0, 0];
+    m.node.position.set(x + o[0], y + o[1], -(z + o[2]));
+    if (m.rotate) {
+      // r2 about the vertical axis, r1 and r0 about the horizontal ones;
+      // mirroring z flips the sense of rotation about x and y
+      m.node.rotation.set(-lerpAngle(f[a + 4], f[b + 4], t) * DEG10,
+                          -lerpAngle(f[a + 5], f[b + 5], t) * DEG10,
+                           lerpAngle(f[a], f[b], t) * DEG10, 'YXZ');
+    }
+  }
+}
+
+function applyToggles() {
+  if (!level) return;
+  level.root.traverse(m => {
+    if (m.userData.mode === 'fog') m.visible = $('fog').checked;
+    if (m.userData.mode === 'shadow') m.visible = $('shadow').checked;
+  });
+  level.materials.forEach(m => { m.wireframe = $('wire').checked; });
+  const f = $('smooth').checked ? THREE.LinearFilter : THREE.NearestFilter;
+  Object.values(level.textures).forEach(t => { t.magFilter = f; t.needsUpdate = true; });
+  level.markerGroup.visible = $('markers').checked;
+  level.gateGroup.visible = $('gates').checked;
+  level.srfGroup.visible = $('srf').checked;
+  level.surfGroup.visible = $('surf').checked;
+  level.plcGroup.visible = $('plc').checked;
+  level.flag4Group.visible = $('flag4').checked;
+  colourFlags();
+}
+
+// colour of a flag value: 0 grey, otherwise spread over the hue circle
+const flagColour = v => (v ? new THREE.Color().setHSL((v * 0.137) % 1, 0.85, 0.55) : new THREE.Color(0x808080));
+function colourFlags() {
+  level.flagGroup.visible = $('flags').checked;
+  const k = $('flagsBy').value === '3' ? 1 : 0, seen = new Map();
+  for (const m of level.flagMeshes) {
+    const v = m.userData.flags[k];
+    m.material.color.copy(flagColour(v));
+    m.material.opacity = v ? 0.7 : 0.25;
+    seen.set(v, (seen.get(v) || 0) + 1);
+  }
+  const legend = $('flagsLegend');
+  legend.hidden = !$('flags').checked;
+  legend.innerHTML = [...seen].sort((a, b) => a[0] - b[0]).map(([v, n]) =>
+    `<span style="display:inline-block;margin:2px 6px 2px 0"><i style="display:inline-block;width:10px;height:10px;` +
+    `background:#${flagColour(v).getHexString()};margin-right:3px"></i>${v} (${n})</span>`).join('');
+}
+
+function view(kind) {
+  const [x0, y0, z0, x1, y1, z1] = level.bounds;
+  const cx = (x0 + x1) / 2, cz = -(z0 + z1) / 2, cy = y0;
+  const span = Math.max(x1 - x0, z1 - z0);
+  const dist = span / 2 / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * 1.05;
+  controls.target.set(cx, cy, cz);
+  if (kind === 'top') {
+    camera.position.set(cx, cy + dist, cz + 0.01);   // tiny offset keeps "north" up
+  } else {
+    camera.position.set(cx, cy + dist * 0.6, cz + dist * 0.6);
+  }
+  camera.up.set(0, 1, 0);
+  controls.update();
+}
+
+// ---- UI ----
+const names = { austria: 'Austria', brazil: 'Brazil', canada: 'Canada', carib: 'Carib',
+                iceland: 'Iceland', japan: 'Japan', usa: 'USA' };
+// the levels the server offers: the original levels of the game directory and, when the
+// editor is started, the editor's levels ("my_<name>")
+const listResp = await fetch('levels/index.json', { cache: 'no-store' });
+const index = listResp.ok ? await listResp.json() : [];
+if (!listResp.ok) $('loading').textContent = (await listResp.json().catch(() => ({}))).error || `HTTP ${listResp.status}`;
+for (const n of index) names[n] ||= n.startsWith('my_') ? `${n.slice(3)} (editor)` : n;
+for (const n of index) $('level').add(new Option(names[n], n));
+const start = new URLSearchParams(location.search).get('level');
+if (start && index.includes(start)) $('level').value = start;
+$('level').onchange = () => {
+  // a new level starts at its default view: drop the old camera from the URL
+  history.replaceState(null, '', `?level=${$('level').value}`);
+  loadLevel($('level').value);
+};
+
+// keep level + camera in the URL (game coordinates), so a reload shows the same spot
+let urlTimer = 0;
+function saveViewToUrl() {
+  if (!level) return;
+  clearTimeout(urlTimer);
+  urlTimer = setTimeout(() => {
+    const c = camera.position, t = controls.target;
+    const r = v => Math.round(v);
+    history.replaceState(null, '',
+      `?level=${level.name}&cam=${r(c.x)},${r(c.y)},${r(-c.z)}&look=${r(t.x)},${r(t.y)},${r(-t.z)}`);
+  }, 300);
+}
+controls.addEventListener('change', saveViewToUrl);
+['fog', 'shadow', 'markers', 'gates', 'srf', 'surf', 'flag4', 'plc', 'flags', 'flagsBy', 'wire', 'smooth'].forEach(id => $(id).onchange = applyToggles);
+// overlays can be switched on from the URL too, e.g. ?level=canada&srf&gates (flags=2 or flags=3)
+const flagsParam = new URLSearchParams(location.search).get('flags');
+if (flagsParam === '2' || flagsParam === '3') $('flagsBy').value = flagsParam;
+for (const id of ['markers', 'gates', 'srf', 'surf', 'flag4', 'plc', 'flags', 'wire'])
+  if (new URLSearchParams(location.search).has(id)) $(id).checked = true;
+$('exportObj').onclick = () => { location.href = `levels/${$('level').value}/export.zip`; };
+$('top').onclick = () => view('top');
+$('oblique').onclick = () => view('oblique');
+
+// ---- tooltip for markers ----
+const mouse = new THREE.Vector2();
+const picker = new THREE.Raycaster();
+renderer.domElement.addEventListener('pointermove', e => {
+  mouse.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+  const tip = $('tip');
+  const targets = [...(level && level.markerGroup.visible ? level.markerInfo : []),
+                   ...(level && level.surfGroup.visible ? level.surfMeshes : []),
+                   ...(level && level.plcGroup.visible ? level.plcMeshes : [])];
+  if (!targets.length) { tip.hidden = true; return; }
+  picker.setFromCamera(mouse, camera);
+  const hit = picker.intersectObjects(targets, false)[0];
+  tip.hidden = !hit;
+  if (hit) {
+    tip.textContent = hit.object.userData.label;
+    tip.style.left = e.clientX + 14 + 'px';
+    tip.style.top = e.clientY + 10 + 'px';
+  }
+});
+
+// ---- ruler: drag on the level to measure (game units) ----
+const rulerGroup = new THREE.Group();
+scene.add(rulerGroup);
+let rulerDrag = null;
+const rulerOn = () => $('ruler').checked;
+const LEFT_PAN = controls.mouseButtons.LEFT;
+$('ruler').onchange = () => {
+  controls.mouseButtons.LEFT = rulerOn() ? null : LEFT_PAN;         // the left button measures, not pans
+  renderer.domElement.style.cursor = rulerOn() ? 'crosshair' : '';
+  if (!rulerOn()) showRuler(null);
+};
+// the point of the level under the cursor (game coordinates), beside it a point on the plane through the camera's
+// target facing the camera
+function worldAt(e) {
+  const m = new THREE.Vector2(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+  picker.setFromCamera(m, camera);
+  const hit = level ? picker.intersectObject(level.root, true).find(h => h.object.visible) : null;
+  let p = hit?.point;
+  if (!p) {
+    const dir = camera.getWorldDirection(new THREE.Vector3());
+    p = picker.ray.intersectPlane(new THREE.Plane().setFromNormalAndCoplanarPoint(dir, controls.target), new THREE.Vector3()) || controls.target.clone();
+  }
+  return [p.x, p.y, -p.z];
+}
+function showRuler(a, b, e) {
+  rulerGroup.clear();
+  const el = $('rulerLabel');
+  if (!a) { el.hidden = true; return; }
+  const P = q => new THREE.Vector3(q[0], q[1], -q[2]);
+  rulerGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([P(a), P(b)]), new THREE.LineBasicMaterial({ color: 0xffcc33, depthTest: false })));
+  rulerGroup.add(new THREE.Points(new THREE.BufferGeometry().setFromPoints([P(a), P(b)]), new THREE.PointsMaterial({ color: 0xffcc33, size: 9, sizeAttenuation: false, depthTest: false })));
+  for (const o of rulerGroup.children) o.renderOrder = 10;
+  const d = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]), flat = Math.hypot(b[0] - a[0], b[2] - a[2]), dy = b[1] - a[1];
+  el.hidden = false;
+  el.textContent = `${Math.round(d)}  (flat ${Math.round(flat)}, height ${dy >= 0 ? '+' : ''}${Math.round(dy)})  ${a.map(Math.round).join(',')} → ${b.map(Math.round).join(',')}`;
+  el.style.left = e.clientX + 14 + 'px'; el.style.top = e.clientY - 10 + 'px';
+}
+renderer.domElement.addEventListener('pointerdown', e => {
+  if (!rulerOn() || e.button !== 0) return;
+  renderer.domElement.setPointerCapture(e.pointerId);
+  const a = worldAt(e);
+  rulerDrag = { a };
+  showRuler(a, a, e);
+});
+renderer.domElement.addEventListener('pointermove', e => { if (rulerDrag) showRuler(rulerDrag.a, worldAt(e), e); });
+renderer.domElement.addEventListener('pointerup', () => { rulerDrag = null; });           // the measurement stays until the next one
+addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.ctrlKey || e.altKey) return;
+  if (e.key.toLowerCase() === 'r') { $('ruler').checked = !rulerOn(); $('ruler').onchange(); }
+  if (e.key === 'Escape') showRuler(null);
+});
+
+// ---- WASD flying ----
+const keys = new Set();
+addEventListener('keydown', e => { if (e.target.tagName !== 'SELECT') keys.add(e.code); });
+addEventListener('keyup', e => keys.delete(e.code));
+addEventListener('blur', () => keys.clear());
+
+function fly(dt) {
+  if (!keys.size) return;
+  const dist = camera.position.distanceTo(controls.target);
+  const speed = dist * (keys.has('ShiftLeft') || keys.has('ShiftRight') ? 2.5 : 0.8) * dt;
+  const fwd = new THREE.Vector3().subVectors(controls.target, camera.position).setY(0).normalize();
+  const right = new THREE.Vector3().crossVectors(fwd, camera.up).normalize();
+  const move = new THREE.Vector3();
+  if (keys.has('KeyW')) move.add(fwd);
+  if (keys.has('KeyS')) move.sub(fwd);
+  if (keys.has('KeyD')) move.add(right);
+  if (keys.has('KeyA')) move.sub(right);
+  if (keys.has('KeyE')) move.y += 1;
+  if (keys.has('KeyQ')) move.y -= 1;
+  if (!move.lengthSq()) return;
+  move.normalize().multiplyScalar(speed);
+  camera.position.add(move);
+  controls.target.add(move);
+}
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+const clock = new THREE.Clock();
+renderer.setAnimationLoop(() => {
+  const dt = Math.min(clock.getDelta(), 0.1);
+  if (level && $('animate').checked) { flipTime += dt; updateFlipbooks(); updateBlinkers(); }
+  if (level) updateMist(dt);
+  if (level && $('animate').checked) updateLightning(dt);
+  if ($('move').checked) { animTime += dt * +$('fps').value; updateMovers(); }
+  fly(dt);
+  controls.update();
+  renderer.render(scene, camera);
+});
+
+if (index.length) await loadLevel($('level').value);
+</script>
+</body>
+</html>

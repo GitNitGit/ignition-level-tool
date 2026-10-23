@@ -1,0 +1,6 @@
+# everything the user makes and the generated files stay local
+/data/
+/out/
+/viewer/levels/
+node_modules/
+.claude/

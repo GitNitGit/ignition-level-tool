@@ -1,0 +1,446 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Ignition Level Editor</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header id="header">
+  <div id="levelBox"><div id="levelName" title="the level being edited">–</div><span id="dirty" hidden title="unsaved changes (Ctrl+S saves)">unsaved</span></div>
+  <nav class="tabs">
+    <button class="tab on" data-tab="track" title="1: control points, road sections, signs">Track</button>
+    <button class="tab" data-tab="landscape" title="2: the terrain (points and triangles)">Landscape</button>
+    <button class="tab" data-tab="paint" title="3: paint colours and textures onto road, kerbs, verge and landscape">Paint</button>
+    <button class="tab" data-tab="assets" title="4: objects placed into the level, own assets">Assets</button>
+    <button class="tab" data-tab="sounds" title="5: sounds placed into the level">Sounds</button>
+    <button class="tab" data-tab="anim" title="6: objects moving along keyframes">Animation</button>
+    <button class="tab" data-tab="deployment" title="7: compile, install into the game, zip">Deployment</button>
+    <button class="tab" data-tab="file" title="8: levels, save, undo">File</button>
+  </nav>
+</header>
+
+<div id="left">
+<aside id="tools">
+  <!-- Track: today's mode 1 -->
+  <section data-tab="track">
+    <div class="seg fill" title="Space switches">
+      <label><input type="radio" name="tpick" id="tpPoints" checked> Points</label>
+      <label><input type="radio" name="tpick" id="tpSections"> Sections</label>
+    </div>
+    <div id="tpPointsPanel">
+      <h2>Control point</h2>
+      <div id="selProps" hidden>
+        <div class="xyz"><span class="lbl">Position</span><i class="ax x">X</i><input id="px" type="number" step="50"><i class="ax y">Y</i><input id="py" type="number" step="25"><i class="ax z">Z</i><input id="pz" type="number" step="50"></div>
+        <div class="props">
+          <span>Track width</span><input id="pw" type="number" step="20" min="120" max="1200">
+          <span title="drivable ground beside the road, left / right of the driving direction; 0 = none">Verge width</span>
+          <div class="pair"><input id="pvl" type="number" step="20" min="0" max="800" placeholder="left"><input id="pvr" type="number" step="20" min="0" max="800" placeholder="right"></div>
+        </div>
+        <h2 title="how the road runs through the point: automatic, with handles (linked: one line through the point; separated: each side its own), or a sharp corner">Tangents</h2>
+        <div class="seg fill"><label><input type="radio" name="tm" id="tmauto"> Auto</label><label><input type="radio" name="tm" id="tmlinked"> Linked</label><label><input type="radio" name="tm" id="tmseparated"> Separated</label><label><input type="radio" name="tm" id="tmcorner"> Corner</label></div>
+      </div>
+      <div class="toolbar">
+        <button id="jump" class="tog" title="two neighbouring points: a jump gap between them (on / off)">Jump</button>
+        <button id="branch" class="tog" title="two points of the main loop: a branch between them; the ends of a branch: remove it">Branch</button>
+        <span class="grow"></span>
+        <button id="setStart" title="one point of the main loop: the start / finish">Set start</button>
+        <button id="reverse">Reverse direction</button>
+      </div>
+    </div>
+    <div id="tpSectionsPanel" hidden>
+      <h2>Road sections</h2>
+      <div class="toolbar">
+        <button id="sKerbL" class="tog">Kerb left</button><button id="sKerbR" class="tog">Kerb right</button>
+        <button id="sVergeL" class="tog" title="drivable verge left of the road; off: the landscape starts at the road edge">Verge left</button><button id="sVergeR" class="tog">Verge right</button>
+        <button id="sTerrain" class="tog" title="off: no landscape at these sections, it runs on under the road (a track in the air)">Terrain</button>
+      </div>
+      <div class="toolbar">
+        <button id="sSlip" class="tog" title="surface behaviour 1, code 5">Slippery</button>
+        <button id="sOrder" class="tog" title="deadly when reached outside the gate order (code 20): shortcuts, short jumps">Deadly if wrong order</button>
+        <button id="sRamp" class="tog" title="ramp road (code 10): the car can leave the road over the edge, as before a jump">Ramp (lift off)</button>
+      </div>
+      <div class="props">
+        <span title="the game moves the camera by this while a car is on the section (placement flags2)">Camera</span>
+        <div class="slider"><input id="camSlider" type="range" min="-500" max="500" step="50" value="0"><output id="camVal">0</output></div>
+        <span title="the sign the game shows while a car is on the section; Auto: before bends, jumps, forks and drops as in the originals">Sign</span>
+        <select id="signSel">
+          <option value="">Auto</option>
+          <option value="1">1 slight left bend</option><option value="2">2 slight right bend</option>
+          <option value="3">3 left bend</option><option value="4">4 right bend</option>
+          <option value="5">5 sharp left bend</option><option value="6">6 sharp right bend</option>
+          <option value="7">7 U-turn</option><option value="8">8 U-turn, other side</option>
+          <option value="9">9 jump</option><option value="10">10 fork</option>
+          <option value="11">11 chicane</option><option value="12">12 chicane, other side</option>
+          <option value="13">13 warning (!)</option><option value="14">14 crest</option>
+          <option value="15">15 drop, car falls</option>
+        </select>
+      </div>
+    </div>
+    <h2>Kerbs</h2>
+    <div class="props">
+      <span title="top width, foot width, height">Profile</span>
+      <div class="triple"><input id="kLid" type="number" step="10" title="width of the flat top"><input id="kFoot" type="number" step="10" title="width of the foot, from the road edge outwards"><input id="kHeight" type="number" step="10" title="height"></div>
+      <span title="default colours of the kerb faces: inner side, top, outer side (paint overrides them)">Colours</span>
+      <div class="triple"><input id="kcIn" type="color" title="inner side"><input id="kcTop" type="color" title="top"><input id="kcOut" type="color" title="outer side"></div>
+      <span>Centre line</span><select id="markCentre"><option value="none">none</option><option value="solid">solid</option><option value="dashed">dashed</option></select>
+    </div>
+    <h2 title="where the track crosses itself at different heights: a tunnel under the upper road, a free-standing bridge, or nothing (the upper road floats, the lower stays whole); a click centres the views">Crossings</h2>
+    <div id="crossList" class="muted"></div>
+  </section>
+
+  <!-- Landscape: mode 2 (terrain); points or triangles -->
+  <section data-tab="landscape" hidden>
+    <div class="seg fill" title="Space switches">
+      <label><input type="radio" name="pick" id="pickPoints" checked> Points</label>
+      <label><input type="radio" name="pick" id="pickTris"> Triangles</label>
+    </div>
+
+    <section data-mode="terrain">
+      <h2>Terrain</h2>
+      <div id="tInfo" class="muted"></div>
+      <div id="tGen">
+        <div class="grid2">
+          <span title="wall beyond the drivable verge before the coarse grid starts">Wall band</span><input id="gBand" type="number" step="20">
+          <span title="spacing of the outer grid (coarse like the originals: 1500)">Grid cell</span><input id="gCell" type="number" step="100">
+          <span title="terrain beyond the track's outline">Margin</span><input id="gMargin" type="number" step="500">
+          <span title="depth of the valley under a jump (deadly)">Jump pit</span><input id="gPit" type="number" step="50">
+          <span title="height of the outer wall around the terrain">Outer wall</span><input id="gRim" type="number" step="100">
+          <span title="longer terrain edges are split">Max edge</span><input id="gMax" type="number" step="100">
+        </div>
+        <button class="wide" id="tGenerate" title="Builds the landscape once from the track and freezes the number of sections per segment">Generate terrain</button>
+      </div>
+      <div id="tTools" hidden>
+        <div id="tSelProps" class="grid2" hidden><span>Height</span><input id="tHeight" type="number" step="25"></div>
+        <div class="btns">
+          <button id="tSplit3" title="Each selected triangle into three, around a new point in the middle">Split in 3</button>
+          <button id="tSplit4" title="Each selected triangle into four: a new point in the middle of every side (neighbours are cut to fit)">Split in 4</button>
+          <button id="tSplitEdge" title="Select two triangles that share an edge: a new point in the middle of that edge">Split edge</button>
+          <button id="tFlip" title="Select two triangles that share an edge: swap the diagonal">Flip edge</button>
+          <button id="tDelete" title="Del: remove the selected triangles and the free points only they used (a hole is shown in red)">Delete triangles</button>
+          <button id="tAdd" title="Select three points: a triangle between them">Add triangle</button>
+          <button id="tFill" title="Select points (also of the road's outer row): triangles between them where there is nothing yet; material and colour from the neighbours">Fill with triangles</button>
+          <button id="tDelPts" title="Del: remove the selected points with every triangle using them (the road's outer row stays)">Delete points</button>
+          <button id="tCopy" title="Ctrl+C: copy the selected triangles (or those whose corners are all selected)">Copy</button>
+          <button id="tPaste" title="Ctrl+V: paste the copy at the mouse in the view under it; the copy is selected, move it into place">Paste</button>
+          <button id="tToPoints" title="Select the corners of the selected triangles">Triangles → points</button>
+          <button id="tLoose" title="Cut the selected triangles loose: a separate object, not part of the landscape">Cut loose (object)</button>
+          <button id="tFree" title="Selected points stay where they are when the track moves">Free points</button>
+          <button id="tClean" title="Remove points no triangle uses">Remove unused points</button>
+          <button id="tRegen" title="Throw the terrain away and generate it again">Generate again …</button>
+        </div>
+        <h2>Material</h2>
+        <div class="btns" title="The material of the selected triangles; new triangles use the last one pressed">
+          <button id="mLand" title="green: not drivable, acts as a wall"><i class="sw" style="background:#48e03c"></i> Landscape</button>
+          <button id="mDrive" title="brown: drivable ground"><i class="sw" style="background:#8c623a"></i> Drivable</button>
+          <button id="mDead" title="red: deadly, explodes"><i class="sw" style="background:#c42820"></i> Deadly</button>
+          <button id="mEdge" title="ochre: drivable with ramp behaviour (code 11). Put it between the road and a drop: the edge from drivable to deadly or wall ground acts as a wall in the game unless the drivable side is a ramp"><i class="sw" style="background:#c4983c"></i> Drop edge</button>
+        </div>
+        <button class="wide" id="tRemove">Remove the terrain …</button>
+      </div>
+    </section>
+    </section>
+  </section>
+
+  <section data-tab="assets" hidden>
+    <div id="assetLib">
+    <h2>Library</h2>
+    <div class="row">
+      <select id="assetSource" title="where the objects come from: an original level of the game directory, or this level's own assets (Custom)"></select>
+      <button id="assetNew" title="build an own asset from simple bodies (Custom)">New …</button>
+      <button id="assetEditBtn" disabled title="build on the chosen own asset">Edit …</button>
+    </div>
+    <div id="assetGrid" title="drag a card into a view: the object lands on the ground there; double-click: at the view's centre"></div>
+    <div id="assetInfo" class="muted"></div>
+    <div id="objBox" class="box" hidden>
+      <h3 id="objTitle">Object</h3>
+      <div id="objFields">
+        <div class="xyz"><span class="lbl">Position</span><i class="ax x">X</i><input id="ox" type="number" step="10"><i class="ax y">Y</i><input id="oy" type="number" step="10"><i class="ax z">Z</i><input id="oz" type="number" step="10"></div>
+        <div class="xyz"><span class="lbl" title="degrees about x, y, z (x first)">Rotation</span><i class="ax x">X</i><input id="orx" type="number" step="5"><i class="ax y">Y</i><input id="ory" type="number" step="5"><i class="ax z">Z</i><input id="orz" type="number" step="5"></div>
+        <div class="xyz"><span class="lbl">Scale</span><i class="ax x">X</i><input id="osx" type="number" step="0.1" min="0.01"><i class="ax y">Y</i><input id="osy" type="number" step="0.1" min="0.01"><i class="ax z">Z</i><input id="osz" type="number" step="0.1" min="0.01"></div>
+      </div>
+      <div class="props">
+        <span title="What happens when the car touches the object. Solid: it is part of the landscape (walls, ground, its surface codes count). Hits the car: the game's reaction of the originals' vehicles and rolling objects (types 44-48; moving or standing). Kicked away: the car knocks it away like the originals' cones (types 150, 153, 152; the game's hit box is 60 x 60 around the object's point, whatever its size). A placed original cone or pylon brings its own setting.">Collision</span>
+        <select id="objCol"><option value="" hidden>(mixed)</option><option value="0">OFF (drawn only)</option><option value="solid">Solid (part of the landscape)</option>
+          <optgroup label="Hits the car"><option value="44">rams it (train, hovercraft, truck: type 44)</option><option value="46">blows it up (USA lorry: type 46)</option><option value="47">flattens it (rolling stones: type 47)</option><option value="48">knocks it (Austria snowballs: type 48)</option><option value="45">throws it up (like a geyser: type 45)</option></optgroup>
+          <optgroup label="Kicked away"><option value="150">Kicked away (light: cones, type 150)</option><option value="153">Kicked away (heavy: type 153)</option><option value="152">Kicked away (very heavy: type 152)</option></optgroup></select>
+      </div>
+      <div class="props">
+        <span title="The game flashes a white-yellow light sprite 20 above the object's point, in a chaser over all such objects in placement order (the pylons of Canada, Carib, Japan: type 154); the car kicks it away like a light cone. A placed original pylon flashes by itself. Switches Collision off.">Warning light</span>
+        <div class="seg"><label><input type="radio" name="lit" id="litOn"> ON</label><label><input type="radio" name="lit" id="litOff"> OFF</label></div>
+      </div>
+      <div class="toolbar">
+        <button id="objDup" title="Duplicate (Ctrl+drag in a view also copies)">⧉ Duplicate</button>
+        <button id="objGround" title="let the selected objects fall straight down until one of their faces touches the ground, the road or another object">⤓ Drop to ground</button>
+        <button id="objReset" title="rotation 0, scale 1">↺ Reset</button>
+        <span class="grow"></span>
+        <button id="objDelete" title="Delete (Del)" class="danger">🗑</button>
+      </div>
+    </div>
+    </div>
+    <!-- the asset editor (mode 'asset'): bodies combined into one asset; a compact properties panel -->
+    <div id="assetEdit" class="ae" hidden>
+    <div class="ae-head">
+      <input id="aeName" placeholder="name" title="the asset's name in the library">
+      <button id="aeDone" class="primary" title="keep the asset, back to the library">Done</button>
+      <button id="aeCancel" title="drop the changes since the edit began">Cancel</button>
+    </div>
+    <h2>Bodies</h2>
+    <div class="toolbar">
+      <select id="aeKind" title="the kind of the new body"></select>
+      <button id="aeAdd" title="Add a body of this kind (beside the selected one)">＋ Add</button>
+    </div>
+    <div class="toolbar" title="boolean operations on the selected bodies: the first in the list is the base, the others are combined with it">
+      <button id="aeUnion" title="Union: the selected bodies joined (Shift+click selects more)">⊕ Union</button>
+      <button id="aeSubtract" title="Subtract: the later selected bodies cut out of the first">⊖ Subtract</button>
+      <button id="aeIntersect" title="Intersect: only where the selected bodies overlap">⊗ Intersect</button>
+    </div>
+    <div id="aeBodies" class="outliner" title="the bodies in order (each is combined with the result of the ones before it): click selects, Ctrl toggles, Shift selects a range; double-click (or F2) renames; a group's row selects all its bodies, its arrow folds it"></div>
+    <div class="toolbar">
+      <button id="aeDup" title="Duplicate (Ctrl+drag in a view also copies)">⧉</button>
+      <button id="aeGroup" title="put the selected bodies into a new group (a folder: the order of combination stays)">⊞ Group</button>
+      <button id="aeUngroup" title="take the selected bodies out of their groups">Ungroup</button>
+      <button id="aeUp" title="combine earlier (up in the list)">▲</button>
+      <button id="aeDown" title="combine later (down in the list)">▼</button>
+      <span class="grow"></span>
+      <button id="aeDelete" title="Delete (Del)" class="danger">🗑</button>
+    </div>
+    <div id="aeProps" hidden>
+      <h2>Transform</h2>
+      <div class="xyz"><span class="lbl" title="relative to the asset's origin">Position</span><i class="ax x">X</i><input id="aepx" type="number" step="10"><i class="ax y">Y</i><input id="aepy" type="number" step="10"><i class="ax z">Z</i><input id="aepz" type="number" step="10"></div>
+      <div class="xyz"><span class="lbl" title="degrees about x, y, z (x first); in the 3D view the gizmo turns about the body's own axes">Rotation</span><i class="ax x">X</i><input id="aerx" type="number" step="5"><i class="ax y">Y</i><input id="aery" type="number" step="5"><i class="ax z">Z</i><input id="aerz" type="number" step="5"></div>
+      <div class="xyz"><span class="lbl">Size</span><i class="ax x">X</i><input id="aesx" type="number" step="10" min="1"><i class="ax y">Y</i><input id="aesy" type="number" step="10" min="1"><i class="ax z">Z</i><input id="aesz" type="number" step="10" min="1"></div>
+      <h2>Body</h2>
+      <div class="props">
+        <span>Name</span><input id="aeBodyName" placeholder="kind and number">
+        <span title="the name of the group the selected bodies are in (click the group's row in the list to select it)">Group</span><input id="aeGroupName" placeholder="no group">
+        <span>Kind</span><select id="aeBodyKind"></select>
+        <span title="how this body combines with the result of the bodies before it">Operation</span><select id="aeBodyOp"></select>
+        <span title="sides of a sphere, cylinder or cone (3-24)">Segments</span><input id="aeSeg" type="number" min="3" max="24" step="1">
+        <span>Colour</span><input id="aeColour" type="color" value="#9a9a9a">
+        <span title="what the body's faces do in the game when the placed object has collision">Surface</span>
+        <select id="aeSurf"><option value="">wall (not drivable)</option><option value="1">drivable ground</option><option value="0">road</option><option value="10">ramp (lifts off)</option><option value="5">slippery road</option><option value="110">deadly</option></select>
+      </div>
+      <h2>Faces</h2>
+      <div class="toolbar">
+        <label class="toggle" title="With this on, a click on a face of the asset gives it the colour beside"><input type="checkbox" id="aeFaceTool"><span>🖌 Paint faces</span></label>
+        <input id="aeFaceColour" type="color" value="#d04040" title="the colour for painted faces">
+        <button id="aePaintBody" title="every face of the selected bodies in the colour beside (it becomes the body's colour; faces painted before take it too)">Paint body</button>
+        <button id="aeFaceClear" title="the body's own colour on all its faces again">Clear</button>
+      </div>
+      <h2>Texture</h2>
+      <div class="props">
+        <span>Image</span><select id="aeTex" title="PNG files in data/textures; a file saved there shows within two seconds"></select>
+      </div>
+      <div class="toolbar">
+        <button id="aeTexFront" title="the frame in front of the body, as wide and high as it">Fit front</button>
+        <button id="aeTexTop" title="the frame above the body">Fit top</button>
+        <button id="aeTexSide" title="the frame beside the body">Fit side</button>
+        <button id="aeTexRemove" title="no texture on the selected bodies">✕</button>
+      </div>
+      <div class="toolbar">
+        <label class="toggle" title="on: the gizmo and the fields below place the selected body's texture frame (the image is projected through it, beyond it it repeats); off: the texture is baked into the body - it moves, turns and scales with it, and a copy carries it"><input type="checkbox" id="aeTexFrame"><span>✎ Place texture</span></label>
+      </div>
+      <div id="aeTexFields" hidden>
+        <div class="xyz"><span class="lbl" title="the frame's centre, relative to the asset's origin">Position</span><i class="ax x">X</i><input id="aetpx" type="number" step="10"><i class="ax y">Y</i><input id="aetpy" type="number" step="10"><i class="ax z">Z</i><input id="aetpz" type="number" step="10"></div>
+        <div class="xyz"><span class="lbl" title="degrees about x, y, z (x first)">Rotation</span><i class="ax x">X</i><input id="aetrx" type="number" step="5"><i class="ax y">Y</i><input id="aetry" type="number" step="5"><i class="ax z">Z</i><input id="aetrz" type="number" step="5"></div>
+        <div class="props"><span title="world units one repeat of the image covers: width, height">Repeat</span><div class="pair"><input id="aetw" type="number" step="10" min="1" title="width"><input id="aeth" type="number" step="10" min="1" title="height"></div></div>
+      </div>
+    </div>
+    <h2 title="what the gizmo moves: the selected bodies or the asset's origin (its placement point; the bodies and the placed copies stay where they are); the texture frame: Place texture above">Gizmo</h2>
+    <div class="seg fill">
+      <label><input type="radio" name="aeTool" id="aeToolBodies" checked> Bodies</label>
+      <label title="the asset's origin: where it is placed and what it turns about"><input type="radio" name="aeTool" id="aeToolOrigin"> Origin</label>
+    </div>
+    <div class="toolbar">
+      <button id="aeOriginCentre" title="the origin to the bottom centre of the bodies' box">⌖ Origin to bottom centre</button>
+    </div>
+    <div id="aeInfo" class="muted"></div>
+    </div>
+  </section>
+
+  <!-- Paint: mode 3, a colour or one of the user's textures per triangle (core/paint.js, tools/paint.js) -->
+  <section data-tab="paint" hidden>
+    <h2>Paint with</h2>
+    <div class="seg fill">
+      <label><input type="radio" name="pwith" id="pwColour" checked> Colour</label>
+      <label title="a PNG from data/textures, repeated over the triangles"><input type="radio" name="pwith" id="pwTexture"> Texture</label>
+    </div>
+    <div id="pColour">
+      <div class="grid2">
+        <span>Colour</span><input id="paintColour" type="color" value="#6c6c70">
+      </div>
+      <div id="recent" class="swatches"></div>
+    </div>
+    <div id="pTexture" hidden>
+      <div class="grid2">
+        <span>Image</span><select id="ptexName" title="PNG files in data/textures; a file saved there shows within two seconds"></select>
+        <span title="world units one repeat of the image covers (its width); the height follows the image's proportions">Size</span><input id="ptexSize" type="number" min="1" step="16" value="256">
+        <span title="how the image lies on a triangle">Mapping</span>
+        <select id="ptexMap">
+          <option value="auto">Auto (by the face's direction)</option>
+          <option value="road">Along the road (road, kerbs, verge)</option>
+          <option value="top">From above</option>
+          <option value="front">From the front (along z)</option>
+          <option value="side">From the side (along x)</option>
+        </select>
+      </div>
+      <div id="ptexPreview" class="texPreview"></div>
+      <div id="ptexInfo" class="muted"></div>
+    </div>
+    <h2>Tool</h2>
+    <div class="btns">
+      <label class="check"><input type="radio" name="ptool" id="toolClick" checked> Click</label>
+      <label class="check"><input type="radio" name="ptool" id="toolBrush"> Brush</label>
+      <label class="check"><input type="radio" name="ptool" id="toolFill" title="all connected triangles painted the same"> Fill</label>
+      <label class="check" title="I: takes the colour or texture of a triangle, then back to the tool before (also: Alt+click)"><input type="radio" name="ptool" id="toolPick"> Pick</label>
+    </div>
+    <div class="grid2">
+      <span>Brush</span><input id="brushSize" type="range" min="4" max="120" value="30">
+    </div>
+    <label class="check" title="Paint the material's own colour back (remove the paint)"><input type="checkbox" id="paintErase"> Erase (material colour)</label>
+    <div id="paintInfo" class="muted"></div>
+  </section>
+
+  <!-- Sounds: mode 'sounds', the level's own sounds and the sources where they play (tabs/sounds.js, core/sounds.js) -->
+  <section data-tab="sounds" hidden>
+    <h2>Sounds</h2>
+    <input id="sndFile" type="file" accept=".wav,audio/wav,audio/x-wav" multiple title="WAV files (any PCM format); they are converted to the game's 8 bit mono 11025 Hz and stored beside the level">
+    <div id="sndList" class="outliner sndList"></div>
+    <div id="sndSlots" class="err"></div>
+    <audio id="sndAudio"></audio>
+    <div id="sndBox" class="box" hidden>
+      <div class="props">
+        <span>Name</span><input id="sndName" title="the name of the file in the level's Sound folder">
+      </div>
+      <div id="sndInfo" class="muted"></div>
+    </div>
+    <div id="srcBox" class="box" hidden>
+      <h3 id="srcTitle">Source</h3>
+      <div class="xyz"><span class="lbl">Position</span><i class="ax x">X</i><input id="srcX" type="number" step="10"><i class="ax y">Y</i><input id="srcY" type="number" step="10"><i class="ax z">Z</i><input id="srcZ" type="number" step="10"></div>
+      <div class="props">
+        <span title="the source rides on this object (and on its animation); its offset to the object stays">Rides on</span><select id="srcObject"></select>
+      </div>
+      <div class="toolbar"><span class="grow"></span><button id="srcDelete" class="danger" title="Delete (Del)">🗑</button></div>
+    </div>
+  </section>
+
+  <!-- Animation: mode 'anim', objects moving along keyframes (tabs/anim.js, core/anim.js); the timeline is under the views -->
+  <section data-tab="anim" hidden>
+    <h2>Animation</h2>
+    <div class="toolbar">
+      <select id="animSel" title="the animations of the level"></select>
+      <button id="animNew" title="a new, empty animation">＋ New</button>
+      <button id="animDel" class="danger" title="delete this animation with its keys">🗑</button>
+    </div>
+    <div id="animBox" hidden>
+      <div class="props">
+        <span>Name</span><input id="animName">
+        <span title="seconds; the game restarts the paths hard after the last frame">Length (s)</span><input id="animLen" type="number" min="1" max="120" step="0.5">
+      </div>
+      <h2>Objects</h2>
+      <div class="toolbar">
+        <button id="animAdd" title="the objects selected in the views join this animation with a key at 0 s (their placement)">＋ Add selected</button>
+        <button id="animRemove" title="the selected objects leave the animation (their keys go, the placement stays)">− Remove</button>
+      </div>
+      <div id="animObjs" class="outliner"></div>
+      <div id="animInfo" class="muted"></div>
+    </div>
+  </section>
+
+  <section data-tab="deployment" hidden>
+    <h2>Build</h2>
+    <button class="wide" id="compile">Compile (write files + zip)</button>
+    <button class="wide" id="install" disabled>Install into the game …</button>
+    <div id="confirm" hidden>
+      Replaces <b id="slot"></b> in the game installation. The original is kept as <b>.org</b>.
+      <div class="row"><button id="installYes">Yes, install</button><button id="installNo">Cancel</button></div>
+    </div>
+    <a id="zipLink" class="muted" hidden>download zip ↓</a>
+    <h2>Viewer</h2>
+    <button class="wide" id="showViewer" title="the level as it is now (saved or not) in the viewer, beside the original levels">Show in viewer ↗</button>
+    <h2>Target</h2>
+    <div class="muted">Slot <b id="slotInfo"></b></div>
+    <div class="muted">Game <span id="gameDirInfo"></span> <a href="/setup.html?next=/" title="choose another game directory">change</a></div>
+  </section>
+
+  <section data-tab="file" hidden>
+    <h2>Level</h2>
+    <select id="level"></select>
+    <div class="row">
+      <button id="save" title="Ctrl+S">Save</button>
+      <button id="undo" title="Ctrl+Z">↶</button>
+      <button id="redo" title="Ctrl+Y">↷</button>
+    </div>
+    <div class="row"><input id="newName" placeholder="name"><button id="create">New</button><button id="saveAs">Save as</button></div>
+  </section>
+</aside>
+
+<aside id="info">
+  <div class="seg fill" id="infoTabs">
+    <label title="errors (red), warnings (orange) and notes (yellow) of the checks; a click on an underlined one centres the views there"><input type="radio" name="infoView" id="infoWarn" checked> <span id="infoWarnLabel">Warnings</span></label>
+    <label title="statistics of the level"><input type="radio" name="infoView" id="infoInfo"> Info</label>
+  </div>
+  <div id="infoBody"><div id="report"></div><div id="stats" hidden></div></div>
+  <div id="selSummary" class="muted"></div>
+</aside>
+</div>
+
+<main>
+  <div id="viewbar">
+    <span class="seg" title="how faces are drawn">
+      <label><input type="radio" name="draw" id="drawSolid" checked> Solid</label>
+      <label><input type="radio" name="draw" id="drawWire"> Wireframe</label>
+    </span>
+    <span class="seg" title="what colours the faces show">
+      <label title="the colour of the material / surface code"><input type="radio" name="colours" id="colSurface"> By surface type</label>
+      <label title="the painted colours with the baked light, as the game shows them"><input type="radio" name="colours" id="colTextured" checked> Textured</label>
+    </span>
+    <button id="frameAll" title="frame everything in all four views (F with nothing selected: the view under the mouse)">Reset view</button>
+    <label class="check" title="R: drag anywhere to measure the distance in world units"><input type="checkbox" id="ruler"> Ruler (R)</label>
+    <button id="refBtn" title="a reference image under the Top, Front or Left view: a sketch, map or photo on the view's plane while building (editor only)">Reference</button>
+    <button id="inspect" class="round" title="F1: what is under the mouse (points, faces, sections)">?</button>
+  </div>
+  <div id="refPanel" class="popover" hidden>
+    <div class="pophead"><h2>Reference image</h2><button id="refClose" title="close">✕</button></div>
+    <div class="props">
+      <span>View</span><select id="refView"><option value="top">Top</option><option value="front">Front</option><option value="left">Left</option></select>
+      <span>Image</span><input id="refFile" type="file" accept="image/png,image/jpeg" title="a PNG or JPEG; it is stored beside the level">
+      <span>Show</span><div class="seg"><label><input type="radio" name="refOn" id="refOn"> ON</label><label><input type="radio" name="refOn" id="refOff"> OFF</label></div>
+      <span>Opacity</span><input id="refOpacity" type="range" min="5" max="100" step="5">
+      <span title="world units the image's width covers">Width</span><input id="refSize" type="number" step="500">
+      <span title="degrees, counter-clockwise on the screen">Rotation</span><input id="refRot" type="number" step="5">
+      <span title="world units to the right on the screen">Shift →</span><input id="refU" type="number" step="100">
+      <span title="world units up on the screen">Shift ↑</span><input id="refV" type="number" step="100">
+    </div>
+    <div class="toolbar"><span class="grow"></span><button id="refRemove" class="danger">Remove image</button></div>
+    <div id="refInfo" class="muted"></div>
+  </div>
+  <div id="views">
+    <div id="rulerLabel" hidden></div>
+    <div id="tip" hidden></div>
+    <div id="box" hidden></div>
+    <div id="brush" hidden></div>
+    <div id="splitV" class="split" title="drag to resize the views"></div>
+    <div id="splitH" class="split" title="drag to resize the views"></div>
+    <div id="splitC" class="split" title="drag to resize the views"></div>
+  </div>
+  <!-- the timeline of the Animation tab -->
+  <div id="timeline" hidden>
+    <div class="tlctl">
+      <div class="row"><button id="tlPlay" title="play / pause (the playhead runs at the game's rate)">▶</button><output id="tlTime">0.00 s</output></div>
+      <label class="toggle" title="a moved object becomes a key at the playhead at once"><input type="checkbox" id="tlAuto" checked><span>Auto-key</span></label>
+      <div class="row"><button id="tlKey" title="the selected objects' poses become keys at the playhead">◆ Key</button><button id="tlDelKey" title="delete the selected key (Del)">✕</button></div>
+    </div>
+    <div class="tlbody">
+      <div class="tlcorner"></div>
+      <div id="tlRuler" title="drag: scrub"></div>
+      <div id="tlTracks"></div>
+      <div id="tlHead"></div>
+    </div>
+  </div>
+</main>
+<script type="module" src="app.js"></script>
+</body>
+</html>
